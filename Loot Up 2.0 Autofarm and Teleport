@@ -1,0 +1,690 @@
+-- Loot Up AutoFarm FULL
+-- ✔ Автофарм
+-- ✔ Быстрая атака
+-- ✔ Noclip
+-- ✔ Телепорт к игрокам
+-- ✔ GUI
+-- ✔ Оптимизация
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local VIM = game:GetService("VirtualInputManager")
+local CoreGui = game:GetService("CoreGui")
+
+local LP = Players.LocalPlayer
+
+---------------------------------------------------
+-- REMOVE OLD GUI
+---------------------------------------------------
+
+pcall(function()
+	local old = CoreGui:FindFirstChild("LootUpFarm")
+	if old then
+		old:Destroy()
+	end
+end)
+
+---------------------------------------------------
+-- CHARACTER
+---------------------------------------------------
+
+local Char
+local Hum
+local Root
+
+local function UpdateChar()
+
+	Char = LP.Character or LP.CharacterAdded:Wait()
+	Hum = Char:WaitForChild("Humanoid")
+	Root = Char:WaitForChild("HumanoidRootPart")
+
+end
+
+UpdateChar()
+
+---------------------------------------------------
+-- SETTINGS
+---------------------------------------------------
+
+local Settings = {
+	Enabled = false,
+	Noclip = false,
+
+	Radius = 150,
+	AttackRadius = 7,
+
+	AttackDelay = 0.05,
+	ScanInterval = 0.4,
+
+	OrbitSpeed = 24
+}
+
+---------------------------------------------------
+-- FAST ATTACK
+---------------------------------------------------
+
+local attacking = false
+
+local function SuperFastAttack()
+
+	if attacking then
+		return
+	end
+
+	attacking = true
+
+	task.spawn(function()
+
+		for i = 1, 5 do
+
+			VIM:SendMouseButtonEvent(
+				0,
+				0,
+				0,
+				true,
+				game,
+				0
+			)
+
+			task.wait(0.015)
+
+			VIM:SendMouseButtonEvent(
+				0,
+				0,
+				0,
+				false,
+				game,
+				0
+			)
+
+			task.wait(0.01)
+
+		end
+
+		attacking = false
+
+	end)
+end
+
+---------------------------------------------------
+-- NOCLIP
+---------------------------------------------------
+
+RunService.Stepped:Connect(function()
+
+	if not Settings.Noclip then
+		return
+	end
+
+	if Char then
+
+		for _, v in ipairs(Char:GetDescendants()) do
+
+			if v:IsA("BasePart") then
+				v.CanCollide = false
+			end
+		end
+	end
+end)
+
+---------------------------------------------------
+-- IGNORE
+---------------------------------------------------
+
+local Ignore = {
+	bone = true,
+	bones = true,
+	npc = true,
+	shop = true,
+	chest = true,
+	spawn = true,
+	dummy = true,
+	portal = true
+}
+
+---------------------------------------------------
+-- PLAYER CACHE
+---------------------------------------------------
+
+local PlayerChars = {}
+
+local function RefreshPlayerChars()
+
+	local t = {}
+
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p.Character then
+			t[p.Character] = true
+		end
+	end
+
+	PlayerChars = t
+end
+
+---------------------------------------------------
+-- CHECK MOB
+---------------------------------------------------
+
+local function IsMob(model)
+
+	if not model:IsA("Model") then
+		return
+	end
+
+	if model == Char then
+		return
+	end
+
+	if PlayerChars[model] then
+		return
+	end
+
+	local lower = model.Name:lower()
+
+	for word in pairs(Ignore) do
+		if lower:find(word) then
+			return
+		end
+	end
+
+	local hum = model:FindFirstChildOfClass("Humanoid")
+
+	if not hum or hum.Health <= 0 then
+		return
+	end
+
+	local root =
+		model:FindFirstChild("HumanoidRootPart")
+		or model:FindFirstChild("UpperTorso")
+		or model:FindFirstChild("Torso")
+		or model:FindFirstChild("Head")
+
+	if root then
+		return root, hum, model
+	end
+end
+
+---------------------------------------------------
+-- ENEMIES
+---------------------------------------------------
+
+local Enemies = {}
+
+local function ScanEnemies()
+
+	local new = {}
+
+	RefreshPlayerChars()
+
+	for _, obj in ipairs(workspace:GetDescendants()) do
+
+		local root, hum, model = IsMob(obj)
+
+		if root then
+			new[model] = root
+		end
+	end
+
+	Enemies = new
+end
+
+---------------------------------------------------
+-- CLOSEST
+---------------------------------------------------
+
+local function GetClosest()
+
+	local best = nil
+	local bestDist = math.huge
+
+	local myPos = Root.Position
+
+	for model, root in pairs(Enemies) do
+
+		if model and model.Parent and root then
+
+			local dist =
+				(root.Position - myPos).Magnitude
+
+			if dist <= Settings.Radius then
+
+				if dist < bestDist then
+					best = model
+					bestDist = dist
+				end
+			end
+		end
+	end
+
+	return best, bestDist
+end
+
+---------------------------------------------------
+-- STOP
+---------------------------------------------------
+
+local function Stop()
+
+	pcall(function()
+
+		if Hum and Root then
+
+			Hum:Move(Vector3.zero, true)
+			Hum:MoveTo(Root.Position)
+
+		end
+
+	end)
+end
+
+---------------------------------------------------
+-- AUTOFARM
+---------------------------------------------------
+
+local Conn
+local LastAttack = 0
+local LastMove = 0
+
+local function Start()
+
+	Stop()
+
+	if Conn then
+		Conn:Disconnect()
+	end
+
+	Conn = RunService.Heartbeat:Connect(function()
+
+		if not Settings.Enabled then
+			return
+		end
+
+		if not Hum or Hum.Health <= 0 then
+			return
+		end
+
+		local enemy, dist = GetClosest()
+
+		if not enemy then
+			return
+		end
+
+		local eroot = Enemies[enemy]
+
+		if not eroot then
+			return
+		end
+
+		if dist > Settings.AttackRadius then
+
+			if tick() - LastMove >= 0.2 then
+
+				LastMove = tick()
+
+				Hum:MoveTo(eroot.Position)
+
+			end
+
+		else
+
+			local right = Root.CFrame.RightVector
+
+			Hum:Move(right * Settings.OrbitSpeed, true)
+
+			if tick() - LastAttack >= Settings.AttackDelay then
+
+				LastAttack = tick()
+
+				SuperFastAttack()
+
+			end
+		end
+	end)
+
+	task.spawn(function()
+
+		while Settings.Enabled and Conn do
+
+			ScanEnemies()
+
+			task.wait(Settings.ScanInterval)
+
+		end
+	end)
+end
+
+local function StopFarm()
+
+	if Conn then
+		Conn:Disconnect()
+		Conn = nil
+	end
+
+	Stop()
+
+	Enemies = {}
+end
+
+---------------------------------------------------
+-- GUI
+---------------------------------------------------
+
+local SGui = Instance.new("ScreenGui")
+SGui.Name = "LootUpFarm"
+SGui.ResetOnSpawn = false
+SGui.Parent = CoreGui
+
+local Main = Instance.new("Frame")
+Main.Size = UDim2.new(0,300,0,270)
+Main.Position = UDim2.new(0,15,0.5,-135)
+Main.BackgroundColor3 = Color3.fromRGB(25,25,35)
+Main.BorderSizePixel = 0
+Main.Active = true
+Main.Draggable = true
+Main.Parent = SGui
+
+Instance.new("UICorner", Main)
+
+---------------------------------------------------
+-- TITLE
+---------------------------------------------------
+
+local Title = Instance.new("TextLabel")
+
+Title.Size = UDim2.new(1,0,0,35)
+Title.BackgroundTransparency = 1
+Title.Text = "Loot Up AutoFarm"
+Title.TextColor3 = Color3.new(1,1,1)
+Title.Font = Enum.Font.GothamBold
+Title.TextScaled = true
+Title.Parent = Main
+
+---------------------------------------------------
+-- AUTOFARM BUTTON
+---------------------------------------------------
+
+local Toggle = Instance.new("TextButton")
+
+Toggle.Size = UDim2.new(0,170,0,45)
+Toggle.Position = UDim2.new(0.5,-85,0,45)
+
+Toggle.BackgroundColor3 = Color3.fromRGB(60,60,90)
+
+Toggle.Text = "АВТОФАРМ OFF"
+
+Toggle.TextColor3 = Color3.new(1,1,1)
+
+Toggle.Font = Enum.Font.GothamBold
+Toggle.TextScaled = true
+
+Toggle.Parent = Main
+
+Instance.new("UICorner", Toggle)
+
+---------------------------------------------------
+-- NOCLIP BUTTON
+---------------------------------------------------
+
+local NoclipButton = Instance.new("TextButton")
+
+NoclipButton.Size = UDim2.new(0,170,0,45)
+NoclipButton.Position = UDim2.new(0.5,-85,0,105)
+
+NoclipButton.BackgroundColor3 = Color3.fromRGB(60,60,90)
+
+NoclipButton.Text = "NOCLIP OFF"
+
+NoclipButton.TextColor3 = Color3.new(1,1,1)
+
+NoclipButton.Font = Enum.Font.GothamBold
+NoclipButton.TextScaled = true
+
+NoclipButton.Parent = Main
+
+Instance.new("UICorner", NoclipButton)
+
+---------------------------------------------------
+-- STATUS
+---------------------------------------------------
+
+local Status = Instance.new("TextLabel")
+
+Status.Size = UDim2.new(1,0,0,60)
+Status.Position = UDim2.new(0,0,0,170)
+
+Status.BackgroundTransparency = 1
+
+Status.Text =
+	"Радиус: "..Settings.Radius..
+	"\nСкорость: "..Settings.AttackDelay
+
+Status.TextColor3 = Color3.new(1,1,1)
+
+Status.Font = Enum.Font.Gotham
+Status.TextScaled = true
+
+Status.Parent = Main
+
+---------------------------------------------------
+-- FARM BUTTON
+---------------------------------------------------
+
+Toggle.MouseButton1Click:Connect(function()
+
+	Settings.Enabled = not Settings.Enabled
+
+	if Settings.Enabled then
+
+		Toggle.Text = "АВТОФАРМ ON"
+
+		Toggle.BackgroundColor3 =
+			Color3.fromRGB(150,50,50)
+
+		Start()
+
+	else
+
+		Toggle.Text = "АВТОФАРМ OFF"
+
+		Toggle.BackgroundColor3 =
+			Color3.fromRGB(60,60,90)
+
+		StopFarm()
+
+	end
+end)
+
+---------------------------------------------------
+-- NOCLIP BUTTON
+---------------------------------------------------
+
+NoclipButton.MouseButton1Click:Connect(function()
+
+	Settings.Noclip = not Settings.Noclip
+
+	if Settings.Noclip then
+
+		NoclipButton.Text = "NOCLIP ON"
+
+		NoclipButton.BackgroundColor3 =
+			Color3.fromRGB(50,150,50)
+
+	else
+
+		NoclipButton.Text = "NOCLIP OFF"
+
+		NoclipButton.BackgroundColor3 =
+			Color3.fromRGB(60,60,90)
+
+	end
+end)
+
+---------------------------------------------------
+-- PLAYER TELEPORT WINDOW
+---------------------------------------------------
+
+local TeleportFrame = Instance.new("Frame")
+TeleportFrame.Size = UDim2.new(0,220,0,260)
+TeleportFrame.Position = UDim2.new(0,330,0.5,-130)
+TeleportFrame.BackgroundColor3 = Color3.fromRGB(25,25,35)
+TeleportFrame.BorderSizePixel = 0
+TeleportFrame.Active = true
+TeleportFrame.Draggable = true
+TeleportFrame.Parent = SGui
+
+Instance.new("UICorner", TeleportFrame)
+
+---------------------------------------------------
+-- TP TITLE
+---------------------------------------------------
+
+local TPTitle = Instance.new("TextLabel")
+
+TPTitle.Size = UDim2.new(1,0,0,35)
+TPTitle.BackgroundTransparency = 1
+TPTitle.Text = "Телепорт к игроку"
+TPTitle.TextColor3 = Color3.new(1,1,1)
+TPTitle.Font = Enum.Font.GothamBold
+TPTitle.TextScaled = true
+TPTitle.Parent = TeleportFrame
+
+---------------------------------------------------
+-- SCROLL
+---------------------------------------------------
+
+local Scroll = Instance.new("ScrollingFrame")
+
+Scroll.Size = UDim2.new(1,-10,1,-45)
+Scroll.Position = UDim2.new(0,5,0,40)
+
+Scroll.CanvasSize = UDim2.new(0,0,0,0)
+
+Scroll.ScrollBarThickness = 6
+
+Scroll.BackgroundTransparency = 1
+Scroll.BorderSizePixel = 0
+
+Scroll.Parent = TeleportFrame
+
+local Layout = Instance.new("UIListLayout")
+Layout.Padding = UDim.new(0,5)
+Layout.Parent = Scroll
+
+---------------------------------------------------
+-- TELEPORT FUNCTION
+---------------------------------------------------
+
+local function TeleportToPlayer(plr)
+
+	if not plr then
+		return
+	end
+
+	if not plr.Character then
+		return
+	end
+
+	local targetRoot =
+		plr.Character:FindFirstChild("HumanoidRootPart")
+
+	if not targetRoot then
+		return
+	end
+
+	if Root then
+		Root.CFrame =
+			targetRoot.CFrame + Vector3.new(0,3,0)
+	end
+end
+
+---------------------------------------------------
+-- REFRESH PLAYER LIST
+---------------------------------------------------
+
+local function RefreshTeleportList()
+
+	for _, child in ipairs(Scroll:GetChildren()) do
+
+		if child:IsA("TextButton") then
+			child:Destroy()
+		end
+	end
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+
+		if plr ~= LP then
+
+			local Btn = Instance.new("TextButton")
+
+			Btn.Size = UDim2.new(1,-5,0,35)
+
+			Btn.BackgroundColor3 =
+				Color3.fromRGB(60,60,90)
+
+			Btn.TextColor3 = Color3.new(1,1,1)
+
+			Btn.Font = Enum.Font.GothamBold
+			Btn.TextScaled = true
+
+			Btn.Text = plr.Name
+
+			Btn.Parent = Scroll
+
+			Instance.new("UICorner", Btn)
+
+			Btn.MouseButton1Click:Connect(function()
+
+				TeleportToPlayer(plr)
+
+			end)
+		end
+	end
+
+	task.wait()
+
+	Scroll.CanvasSize = UDim2.new(
+		0,
+		0,
+		0,
+		Layout.AbsoluteContentSize.Y + 10
+	)
+end
+
+---------------------------------------------------
+-- AUTO REFRESH
+---------------------------------------------------
+
+RefreshTeleportList()
+
+Players.PlayerAdded:Connect(function()
+
+	task.wait(1)
+
+	RefreshTeleportList()
+
+end)
+
+Players.PlayerRemoving:Connect(function()
+
+	task.wait(1)
+
+	RefreshTeleportList()
+
+end)
+
+---------------------------------------------------
+-- RESPAWN
+---------------------------------------------------
+
+LP.CharacterAdded:Connect(function()
+
+	task.wait(1)
+
+	UpdateChar()
+
+	if Settings.Enabled then
+		Start()
+	end
+end)
+
+print("✅ Loot Up AutoFarm FULL loaded")
