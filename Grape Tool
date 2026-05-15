@@ -1,0 +1,632 @@
+--// Grape Tool | Loot Up
+--// AutoFarm + Noclip + Teleport + Tabs + Collapse
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local VIM = game:GetService("VirtualInputManager")
+local CoreGui = game:GetService("CoreGui")
+
+local LP = Players.LocalPlayer
+
+pcall(function()
+	local old = CoreGui:FindFirstChild("GrapeTool")
+	if old then
+		old:Destroy()
+	end
+end)
+
+---------------------------------------------------
+-- CHARACTER
+---------------------------------------------------
+
+local Char, Hum, Root
+
+local function UpdateChar()
+	Char = LP.Character or LP.CharacterAdded:Wait()
+	Hum = Char:WaitForChild("Humanoid")
+	Root = Char:WaitForChild("HumanoidRootPart")
+end
+
+UpdateChar()
+
+---------------------------------------------------
+-- SETTINGS
+---------------------------------------------------
+
+local Settings = {
+	Enabled = false,
+	Noclip = false,
+
+	Radius = 150,
+	AttackRadius = 7,
+
+	AttackDelay = 0.05,
+	ScanInterval = 0.4,
+
+	OrbitSpeed = 24
+}
+
+---------------------------------------------------
+-- ATTACK
+---------------------------------------------------
+
+local attacking = false
+
+local function SuperFastAttack()
+
+	if attacking then
+		return
+	end
+
+	attacking = true
+
+	task.spawn(function()
+
+		for i = 1,5 do
+
+			pcall(function()
+
+				VIM:SendMouseButtonEvent(
+					0,0,0,true,game,0
+				)
+
+				task.wait(0.01)
+
+				VIM:SendMouseButtonEvent(
+					0,0,0,false,game,0
+				)
+
+			end)
+
+			task.wait(0.01)
+		end
+
+		attacking = false
+
+	end)
+end
+
+---------------------------------------------------
+-- NOCLIP
+---------------------------------------------------
+
+RunService.Stepped:Connect(function()
+
+	if not Settings.Noclip then
+		return
+	end
+
+	if Char then
+
+		for _,v in ipairs(Char:GetDescendants()) do
+
+			if v:IsA("BasePart") then
+				v.CanCollide = false
+			end
+		end
+	end
+end)
+
+---------------------------------------------------
+-- MOBS
+---------------------------------------------------
+
+local Ignore = {
+	bone = true,
+	bones = true,
+	npc = true,
+	shop = true,
+	chest = true,
+	spawn = true,
+	dummy = true,
+	portal = true
+}
+
+local PlayerChars = {}
+
+local function RefreshPlayerChars()
+
+	local t = {}
+
+	for _,p in ipairs(Players:GetPlayers()) do
+		if p.Character then
+			t[p.Character] = true
+		end
+	end
+
+	PlayerChars = t
+end
+
+local function IsMob(model)
+
+	if not model:IsA("Model") then
+		return
+	end
+
+	if model == Char then
+		return
+	end
+
+	if PlayerChars[model] then
+		return
+	end
+
+	local lower = model.Name:lower()
+
+	for word in pairs(Ignore) do
+		if lower:find(word) then
+			return
+		end
+	end
+
+	local hum = model:FindFirstChildOfClass("Humanoid")
+
+	if not hum or hum.Health <= 0 then
+		return
+	end
+
+	local root =
+		model:FindFirstChild("HumanoidRootPart")
+		or model:FindFirstChild("UpperTorso")
+		or model:FindFirstChild("Torso")
+		or model:FindFirstChild("Head")
+
+	if root then
+		return root, model
+	end
+end
+
+local Enemies = {}
+
+local function ScanEnemies()
+
+	local new = {}
+
+	RefreshPlayerChars()
+
+	for _,obj in ipairs(workspace:GetDescendants()) do
+
+		local root, model = IsMob(obj)
+
+		if root then
+			new[model] = root
+		end
+	end
+
+	Enemies = new
+end
+
+local function GetClosest()
+
+	local best
+	local bestDist = math.huge
+
+	for model,root in pairs(Enemies) do
+
+		local dist =
+			(root.Position - Root.Position).Magnitude
+
+		if dist < bestDist
+		and dist <= Settings.Radius then
+
+			best = model
+			bestDist = dist
+		end
+	end
+
+	return best, bestDist
+end
+
+---------------------------------------------------
+-- AUTOFARM
+---------------------------------------------------
+
+local Conn
+local LastAttack = 0
+
+local function Stop()
+
+	if Hum and Root then
+		Hum:Move(Vector3.zero,true)
+		Hum:MoveTo(Root.Position)
+	end
+end
+
+local function Start()
+
+	if Conn then
+		Conn:Disconnect()
+	end
+
+	Conn = RunService.Heartbeat:Connect(function()
+
+		if not Settings.Enabled then
+			return
+		end
+
+		local enemy,dist = GetClosest()
+
+		if not enemy then
+			return
+		end
+
+		local eroot = Enemies[enemy]
+
+		if not eroot then
+			return
+		end
+
+		if dist > Settings.AttackRadius then
+
+			Hum:MoveTo(eroot.Position)
+
+		else
+
+			Hum:Move(
+				Root.CFrame.RightVector
+				* Settings.OrbitSpeed,
+				true
+			)
+
+			if tick() - LastAttack >= Settings.AttackDelay then
+
+				LastAttack = tick()
+
+				SuperFastAttack()
+			end
+		end
+	end)
+
+	task.spawn(function()
+
+		while Settings.Enabled and Conn do
+
+			ScanEnemies()
+
+			task.wait(Settings.ScanInterval)
+
+		end
+	end)
+end
+
+local function StopFarm()
+
+	if Conn then
+		Conn:Disconnect()
+		Conn = nil
+	end
+
+	Stop()
+end
+
+---------------------------------------------------
+-- GUI
+---------------------------------------------------
+
+local SGui = Instance.new("ScreenGui")
+SGui.Name = "GrapeTool"
+SGui.Parent = CoreGui
+SGui.ResetOnSpawn = false
+
+local Main = Instance.new("Frame")
+Main.Size = UDim2.new(0,700,0,420)
+Main.Position = UDim2.new(0.5,-350,0.5,-210)
+Main.BackgroundColor3 = Color3.fromRGB(10,10,10)
+Main.BorderColor3 = Color3.fromRGB(60,60,60)
+Main.Active = true
+Main.Draggable = true
+Main.Parent = SGui
+
+---------------------------------------------------
+-- TITLE
+---------------------------------------------------
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1,0,0,45)
+Title.BackgroundTransparency = 1
+Title.Text = "Grape Tool"
+Title.TextColor3 = Color3.new(1,1,1)
+Title.Font = Enum.Font.Code
+Title.TextScaled = true
+Title.Parent = Main
+
+---------------------------------------------------
+-- RED LINE
+---------------------------------------------------
+
+local Red = Instance.new("Frame")
+Red.Size = UDim2.new(1,-30,0,5)
+Red.Position = UDim2.new(0,15,0,48)
+Red.BackgroundColor3 = Color3.fromRGB(255,0,0)
+Red.BorderSizePixel = 0
+Red.Parent = Main
+
+---------------------------------------------------
+-- COLLAPSE
+---------------------------------------------------
+
+local Collapse = Instance.new("TextButton")
+Collapse.Size = UDim2.new(0,40,0,40)
+Collapse.Position = UDim2.new(1,-45,0,3)
+Collapse.BackgroundTransparency = 1
+Collapse.Text = "<"
+Collapse.TextColor3 = Color3.new(1,1,1)
+Collapse.Font = Enum.Font.Code
+Collapse.TextScaled = true
+Collapse.Parent = Main
+
+---------------------------------------------------
+-- TABS
+---------------------------------------------------
+
+local GlobalsTab = Instance.new("TextButton")
+GlobalsTab.Size = UDim2.new(0,180,0,45)
+GlobalsTab.Position = UDim2.new(0,20,0,70)
+GlobalsTab.BackgroundColor3 = Color3.fromRGB(25,25,25)
+GlobalsTab.Text = "globals"
+GlobalsTab.TextColor3 = Color3.new(1,1,1)
+GlobalsTab.Font = Enum.Font.Code
+GlobalsTab.TextScaled = true
+GlobalsTab.Parent = Main
+
+local SettingsTab = GlobalsTab:Clone()
+SettingsTab.Text = "settings"
+SettingsTab.Position = UDim2.new(0,210,0,70)
+SettingsTab.Parent = Main
+
+local MiscTab = GlobalsTab:Clone()
+MiscTab.Text = "misc"
+MiscTab.Position = UDim2.new(0,400,0,70)
+MiscTab.Parent = Main
+
+---------------------------------------------------
+-- PANELS
+---------------------------------------------------
+
+local GlobalsPanel = Instance.new("Frame")
+GlobalsPanel.Size = UDim2.new(0,660,0,250)
+GlobalsPanel.Position = UDim2.new(0,20,0,135)
+GlobalsPanel.BackgroundColor3 = Color3.fromRGB(8,8,8)
+GlobalsPanel.BorderColor3 = Color3.fromRGB(60,60,60)
+GlobalsPanel.Parent = Main
+
+local SettingsPanel = GlobalsPanel:Clone()
+SettingsPanel.Visible = false
+SettingsPanel.Parent = Main
+
+local MiscPanel = GlobalsPanel:Clone()
+MiscPanel.Visible = false
+MiscPanel.Parent = Main
+
+---------------------------------------------------
+-- GLOBALS
+---------------------------------------------------
+
+local FarmBtn = Instance.new("TextButton")
+FarmBtn.Size = UDim2.new(1,-20,0,45)
+FarmBtn.Position = UDim2.new(0,10,0,20)
+FarmBtn.BackgroundColor3 = Color3.fromRGB(15,15,15)
+FarmBtn.Text = "> AutoFarm OFF"
+FarmBtn.TextColor3 = Color3.new(1,1,1)
+FarmBtn.Font = Enum.Font.Code
+FarmBtn.TextScaled = true
+FarmBtn.Parent = GlobalsPanel
+
+local NoclipBtn = FarmBtn:Clone()
+NoclipBtn.Position = UDim2.new(0,10,0,80)
+NoclipBtn.Text = "> Noclip OFF"
+NoclipBtn.Parent = GlobalsPanel
+
+---------------------------------------------------
+-- SETTINGS
+---------------------------------------------------
+
+local TG = Instance.new("TextLabel")
+TG.Size = UDim2.new(1,0,1,0)
+TG.BackgroundTransparency = 1
+TG.Text = "✈ Telegram\n@EvoBatter"
+TG.TextColor3 = Color3.new(1,1,1)
+TG.Font = Enum.Font.Code
+TG.TextScaled = true
+TG.Parent = SettingsPanel
+
+---------------------------------------------------
+-- TELEPORT
+---------------------------------------------------
+
+local Scroll = Instance.new("ScrollingFrame")
+Scroll.Size = UDim2.new(1,-20,1,-20)
+Scroll.Position = UDim2.new(0,10,0,10)
+Scroll.BackgroundTransparency = 1
+Scroll.CanvasSize = UDim2.new(0,0,0,0)
+Scroll.ScrollBarThickness = 5
+Scroll.Parent = MiscPanel
+
+local Layout = Instance.new("UIListLayout")
+Layout.Padding = UDim.new(0,5)
+Layout.Parent = Scroll
+
+local function TeleportToPlayer(plr)
+
+	if not plr.Character then
+		return
+	end
+
+	local target =
+		plr.Character:FindFirstChild("HumanoidRootPart")
+
+	if target then
+		Root.CFrame =
+			target.CFrame + Vector3.new(0,3,0)
+	end
+end
+
+local function RefreshPlayers()
+
+	for _,v in pairs(Scroll:GetChildren()) do
+
+		if v:IsA("TextButton") then
+			v:Destroy()
+		end
+	end
+
+	for _,plr in pairs(Players:GetPlayers()) do
+
+		if plr ~= LP then
+
+			local Btn = Instance.new("TextButton")
+
+			Btn.Size = UDim2.new(1,-5,0,35)
+
+			Btn.BackgroundColor3 =
+				Color3.fromRGB(15,15,15)
+
+			Btn.Text = "> "..plr.Name
+
+			Btn.TextColor3 = Color3.new(1,1,1)
+
+			Btn.Font = Enum.Font.Code
+			Btn.TextScaled = true
+
+			Btn.Parent = Scroll
+
+			Btn.MouseButton1Click:Connect(function()
+
+				TeleportToPlayer(plr)
+
+			end)
+		end
+	end
+
+	task.wait()
+
+	Scroll.CanvasSize =
+		UDim2.new(
+			0,
+			0,
+			0,
+			Layout.AbsoluteContentSize.Y + 10
+		)
+end
+
+RefreshPlayers()
+
+---------------------------------------------------
+-- TAB LOGIC
+---------------------------------------------------
+
+GlobalsTab.MouseButton1Click:Connect(function()
+
+	GlobalsPanel.Visible = true
+	SettingsPanel.Visible = false
+	MiscPanel.Visible = false
+
+end)
+
+SettingsTab.MouseButton1Click:Connect(function()
+
+	GlobalsPanel.Visible = false
+	SettingsPanel.Visible = true
+	MiscPanel.Visible = false
+
+end)
+
+MiscTab.MouseButton1Click:Connect(function()
+
+	GlobalsPanel.Visible = false
+	SettingsPanel.Visible = false
+	MiscPanel.Visible = true
+
+end)
+
+---------------------------------------------------
+-- COLLAPSE LOGIC
+---------------------------------------------------
+
+local Minimized = false
+
+Collapse.MouseButton1Click:Connect(function()
+
+	Minimized = not Minimized
+
+	if Minimized then
+
+		Main.Size = UDim2.new(0,700,0,60)
+
+		GlobalsTab.Visible = false
+		SettingsTab.Visible = false
+		MiscTab.Visible = false
+
+		GlobalsPanel.Visible = false
+		SettingsPanel.Visible = false
+		MiscPanel.Visible = false
+
+		Collapse.Text = ">"
+
+	else
+
+		Main.Size = UDim2.new(0,700,0,420)
+
+		GlobalsTab.Visible = true
+		SettingsTab.Visible = true
+		MiscTab.Visible = true
+
+		GlobalsPanel.Visible = true
+
+		Collapse.Text = "<"
+	end
+end)
+
+---------------------------------------------------
+-- BUTTONS
+---------------------------------------------------
+
+FarmBtn.MouseButton1Click:Connect(function()
+
+	Settings.Enabled = not Settings.Enabled
+
+	if Settings.Enabled then
+
+		FarmBtn.Text = "> AutoFarm ON"
+
+		Start()
+
+	else
+
+		FarmBtn.Text = "> AutoFarm OFF"
+
+		StopFarm()
+	end
+end)
+
+NoclipBtn.MouseButton1Click:Connect(function()
+
+	Settings.Noclip = not Settings.Noclip
+
+	if Settings.Noclip then
+
+		NoclipBtn.Text = "> Noclip ON"
+
+	else
+
+		NoclipBtn.Text = "> Noclip OFF"
+
+	end
+end)
+
+---------------------------------------------------
+-- RESPAWN
+---------------------------------------------------
+
+LP.CharacterAdded:Connect(function()
+
+	task.wait(1)
+
+	UpdateChar()
+
+	if Settings.Enabled then
+		Start()
+	end
+end)
+
+print("✅ Grape Tool Loaded")
