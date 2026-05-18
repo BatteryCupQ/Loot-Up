@@ -1,0 +1,1010 @@
+--// Grape Tool | Loot Up
+--// AutoFarm + Noclip + Teleport + FPS Boost + Visuals + Tabs + Collapse
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+local VIM = game:GetService("VirtualInputManager")
+local CoreGui = game:GetService("CoreGui")
+
+local LP = Players.LocalPlayer
+
+pcall(function()
+	local old = CoreGui:FindFirstChild("GrapeTool")
+	if old then
+		old:Destroy()
+	end
+end)
+
+---------------------------------------------------
+-- CHARACTER
+---------------------------------------------------
+
+local Char, Hum, Root
+
+local function UpdateChar()
+	Char = LP.Character or LP.CharacterAdded:Wait()
+	Hum = Char:WaitForChild("Humanoid")
+	Root = Char:WaitForChild("HumanoidRootPart")
+end
+
+UpdateChar()
+
+---------------------------------------------------
+-- SETTINGS
+---------------------------------------------------
+
+local Settings = {
+	Enabled = false,
+	Noclip = false,
+
+	Radius = 150,
+	AttackRadius = 7,
+
+	AttackDelay = 0.05,
+	ScanInterval = 0.4,
+
+	OrbitSpeed = 24
+}
+
+---------------------------------------------------
+-- ATTACK
+---------------------------------------------------
+
+local attacking = false
+
+local function SuperFastAttack()
+
+	if attacking then
+		return
+	end
+
+	attacking = true
+
+	task.spawn(function()
+
+		for i = 1,5 do
+
+			pcall(function()
+
+				VIM:SendMouseButtonEvent(
+					0,0,0,true,game,0
+				)
+
+				task.wait(0.01)
+
+				VIM:SendMouseButtonEvent(
+					0,0,0,false,game,0
+				)
+
+			end)
+
+			task.wait(0.01)
+		end
+
+		attacking = false
+
+	end)
+end
+
+---------------------------------------------------
+-- NOCLIP
+---------------------------------------------------
+
+RunService.Stepped:Connect(function()
+
+	if not Settings.Noclip then
+		return
+	end
+
+	if Char then
+
+		for _,v in ipairs(Char:GetDescendants()) do
+
+			if v:IsA("BasePart") then
+				v.CanCollide = false
+			end
+		end
+	end
+end)
+
+---------------------------------------------------
+-- MOBS
+---------------------------------------------------
+
+local Ignore = {
+	bone = true,
+	bones = true,
+	npc = true,
+	shop = true,
+	chest = true,
+	spawn = true,
+	dummy = true,
+	portal = true
+}
+
+local PlayerChars = {}
+
+local function RefreshPlayerChars()
+
+	local t = {}
+
+	for _,p in ipairs(Players:GetPlayers()) do
+		if p.Character then
+			t[p.Character] = true
+		end
+	end
+
+	PlayerChars = t
+end
+
+local function IsMob(model)
+
+	if not model:IsA("Model") then
+		return
+	end
+
+	if model == Char then
+		return
+	end
+
+	if PlayerChars[model] then
+		return
+	end
+
+	local lower = model.Name:lower()
+
+	for word in pairs(Ignore) do
+		if lower:find(word) then
+			return
+		end
+	end
+
+	local hum = model:FindFirstChildOfClass("Humanoid")
+
+	if not hum or hum.Health <= 0 then
+		return
+	end
+
+	local root =
+		model:FindFirstChild("HumanoidRootPart")
+		or model:FindFirstChild("UpperTorso")
+		or model:FindFirstChild("Torso")
+		or model:FindFirstChild("Head")
+
+	if root then
+		return root, model
+	end
+end
+
+local Enemies = {}
+
+local function ScanEnemies()
+
+	local new = {}
+
+	RefreshPlayerChars()
+
+	for _,obj in ipairs(workspace:GetDescendants()) do
+
+		local root, model = IsMob(obj)
+
+		if root then
+			new[model] = root
+		end
+	end
+
+	Enemies = new
+end
+
+local function GetClosest()
+
+	local best
+	local bestDist = math.huge
+
+	for model,root in pairs(Enemies) do
+
+		local dist =
+			(root.Position - Root.Position).Magnitude
+
+		if dist < bestDist
+		and dist <= Settings.Radius then
+
+			best = model
+			bestDist = dist
+		end
+	end
+
+	return best, bestDist
+end
+
+---------------------------------------------------
+-- AUTOFARM
+---------------------------------------------------
+
+local Conn
+local LastAttack = 0
+
+local function Stop()
+
+	if Hum and Root then
+		Hum:Move(Vector3.zero,true)
+		Hum:MoveTo(Root.Position)
+	end
+end
+
+local function Start()
+
+	if Conn then
+		Conn:Disconnect()
+	end
+
+	Conn = RunService.Heartbeat:Connect(function()
+
+		if not Settings.Enabled then
+			return
+		end
+
+		local enemy,dist = GetClosest()
+
+		if not enemy then
+			return
+		end
+
+		local eroot = Enemies[enemy]
+
+		if not eroot then
+			return
+		end
+
+		if dist > Settings.AttackRadius then
+
+			Hum:MoveTo(eroot.Position)
+
+		else
+
+			Hum:Move(
+				Root.CFrame.RightVector
+				* Settings.OrbitSpeed,
+				true
+			)
+
+			if tick() - LastAttack >= Settings.AttackDelay then
+
+				LastAttack = tick()
+
+				SuperFastAttack()
+			end
+		end
+	end)
+
+	task.spawn(function()
+
+		while Settings.Enabled and Conn do
+
+			ScanEnemies()
+
+			task.wait(Settings.ScanInterval)
+
+		end
+	end)
+end
+
+local function StopFarm()
+
+	if Conn then
+		Conn:Disconnect()
+		Conn = nil
+	end
+
+	Stop()
+end
+
+---------------------------------------------------
+-- FPS BOOST
+---------------------------------------------------
+
+local FPSEnabled = false
+
+local OrigLight = {
+	GlobalShadows  = Lighting.GlobalShadows,
+	FogEnd         = Lighting.FogEnd,
+	FogStart       = Lighting.FogStart,
+	Brightness     = Lighting.Brightness,
+	OutdoorAmbient = Lighting.OutdoorAmbient,
+}
+
+local removedFX     = {}
+local removedFXParent = {}
+
+local FXClasses = {
+	"ParticleEmitter","Trail","Smoke",
+	"Fire","Sparkles","PointLight",
+	"SpotLight","SurfaceLight",
+}
+
+local LightingFX = {
+	"BloomEffect","BlurEffect","SunRaysEffect",
+	"ColorCorrectionEffect","DepthOfFieldEffect",
+}
+
+local function EnableFPS()
+	-- графика минимум
+	pcall(function()
+		settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+	end)
+	-- тени и туман
+	Lighting.GlobalShadows  = false
+	Lighting.FogEnd         = 9e9
+	Lighting.FogStart       = 9e9
+	Lighting.Brightness     = 2
+	Lighting.OutdoorAmbient = Color3.fromRGB(128,128,128)
+	-- убираем эффекты из Lighting
+	for _, obj in ipairs(Lighting:GetChildren()) do
+		for _, cls in ipairs(LightingFX) do
+			if obj:IsA(cls) then
+				table.insert(removedFX, obj)
+				table.insert(removedFXParent, obj.Parent)
+				obj.Parent = nil
+				break
+			end
+		end
+	end
+	-- убираем партиклы/свет из workspace
+	for _, obj in ipairs(workspace:GetDescendants()) do
+		for _, cls in ipairs(FXClasses) do
+			if obj:IsA(cls) then
+				table.insert(removedFX, obj)
+				table.insert(removedFXParent, obj.Parent)
+				pcall(function() obj.Parent = nil end)
+				break
+			end
+		end
+	end
+	-- убираем тени у деталей
+	for _, obj in ipairs(workspace:GetDescendants()) do
+		if obj:IsA("BasePart") then
+			pcall(function() obj.CastShadow = false end)
+		end
+	end
+end
+
+local function DisableFPS()
+	pcall(function()
+		settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
+	end)
+	Lighting.GlobalShadows  = OrigLight.GlobalShadows
+	Lighting.FogEnd         = OrigLight.FogEnd
+	Lighting.FogStart       = OrigLight.FogStart
+	Lighting.Brightness     = OrigLight.Brightness
+	Lighting.OutdoorAmbient = OrigLight.OutdoorAmbient
+	for i, obj in ipairs(removedFX) do
+		pcall(function() obj.Parent = removedFXParent[i] end)
+	end
+	removedFX       = {}
+	removedFXParent = {}
+	for _, obj in ipairs(workspace:GetDescendants()) do
+		if obj:IsA("BasePart") then
+			pcall(function() obj.CastShadow = true end)
+		end
+	end
+end
+
+---------------------------------------------------
+-- SKYBOX
+---------------------------------------------------
+
+local currentSky = nil
+
+local Skies = {
+	purple = {
+		SkyboxBk = "rbxassetid://6444884337",
+		SkyboxDn = "rbxassetid://6444884337",
+		SkyboxFt = "rbxassetid://6444884337",
+		SkyboxLf = "rbxassetid://6444884337",
+		SkyboxRt = "rbxassetid://6444884337",
+		SkyboxUp = "rbxassetid://6444884337",
+		SunTextureId = "rbxassetid://6444884337",
+		MoonTextureId = "rbxassetid://6444884337",
+	},
+	red = {
+		SkyboxBk = "rbxassetid://6693535610",
+		SkyboxDn = "rbxassetid://6693535610",
+		SkyboxFt = "rbxassetid://6693535610",
+		SkyboxLf = "rbxassetid://6693535610",
+		SkyboxRt = "rbxassetid://6693535610",
+		SkyboxUp = "rbxassetid://6693535610",
+		SunTextureId = "rbxassetid://6693535610",
+		MoonTextureId = "rbxassetid://6693535610",
+	},
+	white = {
+		SkyboxBk = "rbxassetid://6444826543",
+		SkyboxDn = "rbxassetid://6444826543",
+		SkyboxFt = "rbxassetid://6444826543",
+		SkyboxLf = "rbxassetid://6444826543",
+		SkyboxRt = "rbxassetid://6444826543",
+		SkyboxUp = "rbxassetid://6444826543",
+		SunTextureId = "rbxassetid://6444826543",
+		MoonTextureId = "rbxassetid://6444826543",
+	},
+}
+
+-- Цвета для каждого скайбокса (Ambient + OutdoorAmbient)
+local SkyColors = {
+	purple = {
+		Ambient        = Color3.fromRGB(60,  0,  90),
+		OutdoorAmbient = Color3.fromRGB(80,  0, 120),
+	},
+	red = {
+		Ambient        = Color3.fromRGB(90,  0,  0),
+		OutdoorAmbient = Color3.fromRGB(120, 0,  0),
+	},
+	white = {
+		Ambient        = Color3.fromRGB(180,180,180),
+		OutdoorAmbient = Color3.fromRGB(200,200,200),
+	},
+}
+
+local origSky    = Lighting:FindFirstChildOfClass("Sky")
+local origAmbient       = Lighting.Ambient
+local origOutdoorAmbient = Lighting.OutdoorAmbient
+
+local function SetSky(name)
+	-- Убираем старый скай
+	if currentSky then
+		currentSky:Destroy()
+		currentSky = nil
+	end
+	-- Восстанавливаем оригинальный скай если был
+	if origSky and name == nil then
+		origSky.Parent = Lighting
+		Lighting.Ambient        = origAmbient
+		Lighting.OutdoorAmbient = origOutdoorAmbient
+		return
+	end
+	if name == nil then return end
+
+	-- Убираем оригинальный
+	if origSky then origSky.Parent = nil end
+
+	-- Создаём новый Sky
+	local sky = Instance.new("Sky")
+	local data = Skies[name]
+	for prop, val in pairs(data) do
+		pcall(function() sky[prop] = val end)
+	end
+	sky.Parent = Lighting
+	currentSky = sky
+
+	-- Цвет атмосферы
+	local col = SkyColors[name]
+	if col then
+		Lighting.Ambient        = col.Ambient
+		Lighting.OutdoorAmbient = col.OutdoorAmbient
+	end
+end
+
+---------------------------------------------------
+-- TRAIL (Bluid — след за игроком)
+---------------------------------------------------
+
+local TrailEnabled = false
+local trailObj     = nil
+local trailAtt0    = nil
+local trailAtt1    = nil
+
+-- Цвета трейла (красивый градиент)
+local TrailSequence = ColorSequence.new({
+	ColorSequenceKeypoint.new(0,   Color3.fromRGB(255, 50, 255)),
+	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(100, 50, 255)),
+	ColorSequenceKeypoint.new(1,   Color3.fromRGB(50,  200, 255)),
+})
+
+local function EnableTrail()
+	if not Root then return end
+	-- Аттачменты на HumanoidRootPart
+	trailAtt0 = Instance.new("Attachment")
+	trailAtt0.Position = Vector3.new(0,  1, 0)
+	trailAtt0.Parent   = Root
+
+	trailAtt1 = Instance.new("Attachment")
+	trailAtt1.Position = Vector3.new(0, -1, 0)
+	trailAtt1.Parent   = Root
+
+	-- Сам Trail
+	trailObj = Instance.new("Trail")
+	trailObj.Attachment0   = trailAtt0
+	trailObj.Attachment1   = trailAtt1
+	trailObj.Lifetime      = 0.4
+	trailObj.MinLength     = 0
+	trailObj.FaceCamera    = true
+	trailObj.Color         = TrailSequence
+	trailObj.Transparency  = NumberSequence.new({
+		NumberSequenceKeypoint.new(0,   0),
+		NumberSequenceKeypoint.new(0.7, 0.3),
+		NumberSequenceKeypoint.new(1,   1),
+	})
+	trailObj.LightEmission = 0.8
+	trailObj.LightInfluence = 0.2
+	trailObj.WidthScale    = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1.5),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	trailObj.Parent = Root
+end
+
+local function DisableTrail()
+	if trailObj    then trailObj:Destroy();    trailObj    = nil end
+	if trailAtt0   then trailAtt0:Destroy();   trailAtt0   = nil end
+	if trailAtt1   then trailAtt1:Destroy();   trailAtt1   = nil end
+end
+
+---------------------------------------------------
+-- GUI
+---------------------------------------------------
+
+local SGui = Instance.new("ScreenGui")
+SGui.Name = "GrapeTool"
+SGui.Parent = CoreGui
+SGui.ResetOnSpawn = false
+
+local Main = Instance.new("Frame")
+Main.Size = UDim2.new(0,700,0,420)
+Main.Position = UDim2.new(0.5,-350,0.5,-210)
+Main.BackgroundColor3 = Color3.fromRGB(10,10,10)
+Main.BorderColor3 = Color3.fromRGB(60,60,60)
+Main.Active = true
+Main.Draggable = true
+Main.Parent = SGui
+
+---------------------------------------------------
+-- TITLE
+---------------------------------------------------
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1,0,0,45)
+Title.BackgroundTransparency = 1
+Title.Text = "Grape Tool"
+Title.TextColor3 = Color3.new(1,1,1)
+Title.Font = Enum.Font.Code
+Title.TextScaled = true
+Title.Parent = Main
+
+---------------------------------------------------
+-- RED LINE
+---------------------------------------------------
+
+local Red = Instance.new("Frame")
+Red.Size = UDim2.new(1,-30,0,5)
+Red.Position = UDim2.new(0,15,0,48)
+Red.BackgroundColor3 = Color3.fromRGB(255,0,0)
+Red.BorderSizePixel = 0
+Red.Parent = Main
+
+---------------------------------------------------
+-- COLLAPSE
+---------------------------------------------------
+
+local Collapse = Instance.new("TextButton")
+Collapse.Size = UDim2.new(0,40,0,40)
+Collapse.Position = UDim2.new(1,-45,0,3)
+Collapse.BackgroundTransparency = 1
+Collapse.Text = "<"
+Collapse.TextColor3 = Color3.new(1,1,1)
+Collapse.Font = Enum.Font.Code
+Collapse.TextScaled = true
+Collapse.Parent = Main
+
+---------------------------------------------------
+-- TABS (добавлена вкладка visuals)
+---------------------------------------------------
+
+local GlobalsTab = Instance.new("TextButton")
+GlobalsTab.Size = UDim2.new(0,150,0,45)
+GlobalsTab.Position = UDim2.new(0,20,0,70)
+GlobalsTab.BackgroundColor3 = Color3.fromRGB(25,25,25)
+GlobalsTab.Text = "globals"
+GlobalsTab.TextColor3 = Color3.new(1,1,1)
+GlobalsTab.Font = Enum.Font.Code
+GlobalsTab.TextScaled = true
+GlobalsTab.Parent = Main
+
+local SettingsTab = GlobalsTab:Clone()
+SettingsTab.Text = "settings"
+SettingsTab.Position = UDim2.new(0,178,0,70)
+SettingsTab.Parent = Main
+
+local VisualsTab = GlobalsTab:Clone()
+VisualsTab.Text = "visuals"
+VisualsTab.Position = UDim2.new(0,336,0,70)
+VisualsTab.Parent = Main
+
+local MiscTab = GlobalsTab:Clone()
+MiscTab.Text = "misc"
+MiscTab.Position = UDim2.new(0,494,0,70)
+MiscTab.Parent = Main
+
+---------------------------------------------------
+-- PANELS
+---------------------------------------------------
+
+local GlobalsPanel = Instance.new("Frame")
+GlobalsPanel.Size = UDim2.new(0,660,0,250)
+GlobalsPanel.Position = UDim2.new(0,20,0,135)
+GlobalsPanel.BackgroundColor3 = Color3.fromRGB(8,8,8)
+GlobalsPanel.BorderColor3 = Color3.fromRGB(60,60,60)
+GlobalsPanel.Parent = Main
+
+local SettingsPanel = GlobalsPanel:Clone()
+SettingsPanel.Visible = false
+SettingsPanel.Parent = Main
+
+local VisualsPanel = GlobalsPanel:Clone()
+VisualsPanel.Visible = false
+VisualsPanel.Parent = Main
+
+local MiscPanel = GlobalsPanel:Clone()
+MiscPanel.Visible = false
+MiscPanel.Parent = Main
+
+---------------------------------------------------
+-- GLOBALS
+---------------------------------------------------
+
+local FarmBtn = Instance.new("TextButton")
+FarmBtn.Size = UDim2.new(1,-20,0,45)
+FarmBtn.Position = UDim2.new(0,10,0,20)
+FarmBtn.BackgroundColor3 = Color3.fromRGB(15,15,15)
+FarmBtn.Text = "> AutoFarm OFF"
+FarmBtn.TextColor3 = Color3.new(1,1,1)
+FarmBtn.Font = Enum.Font.Code
+FarmBtn.TextScaled = true
+FarmBtn.Parent = GlobalsPanel
+
+local NoclipBtn = FarmBtn:Clone()
+NoclipBtn.Position = UDim2.new(0,10,0,80)
+NoclipBtn.Text = "> Noclip OFF"
+NoclipBtn.Parent = GlobalsPanel
+
+local FPSBtn = FarmBtn:Clone()
+FPSBtn.Position = UDim2.new(0,10,0,140)
+FPSBtn.Text = "> FPS Boost OFF"
+FPSBtn.Parent = GlobalsPanel
+
+---------------------------------------------------
+-- SETTINGS
+---------------------------------------------------
+
+local TG = Instance.new("TextLabel")
+TG.Size = UDim2.new(1,0,1,0)
+TG.BackgroundTransparency = 1
+TG.Text = "✈ Telegram\n@EvoBatter"
+TG.TextColor3 = Color3.new(1,1,1)
+TG.Font = Enum.Font.Code
+TG.TextScaled = true
+TG.Parent = SettingsPanel
+
+---------------------------------------------------
+-- VISUALS PANEL
+---------------------------------------------------
+
+-- Заголовок SkyBox
+local SkyLabel = Instance.new("TextLabel")
+SkyLabel.Size = UDim2.new(1,-20,0,30)
+SkyLabel.Position = UDim2.new(0,10,0,10)
+SkyLabel.BackgroundTransparency = 1
+SkyLabel.Text = "— SkyBox —"
+SkyLabel.TextColor3 = Color3.fromRGB(180,180,180)
+SkyLabel.Font = Enum.Font.Code
+SkyLabel.TextScaled = true
+SkyLabel.Parent = VisualsPanel
+
+-- Кнопки скайбокса
+local function MakeSkyBtn(text, posX, color)
+	local btn = Instance.new("TextButton")
+	btn.Size             = UDim2.new(0,195,0,40)
+	btn.Position         = UDim2.new(0,posX,0,48)
+	btn.BackgroundColor3 = color
+	btn.Text             = text
+	btn.TextColor3       = Color3.new(1,1,1)
+	btn.Font             = Enum.Font.Code
+	btn.TextScaled       = true
+	btn.Parent           = VisualsPanel
+	return btn
+end
+
+local SkyPurpleBtn = MakeSkyBtn("🟣 Purple",  10, Color3.fromRGB(80,0,120))
+local SkyRedBtn    = MakeSkyBtn("🔴 Red",     215, Color3.fromRGB(120,0,0))
+local SkyWhiteBtn  = MakeSkyBtn("⚪ White",   420, Color3.fromRGB(160,160,160))
+
+-- Кнопка сброса скайбокса
+local SkyResetBtn = Instance.new("TextButton")
+SkyResetBtn.Size             = UDim2.new(1,-20,0,35)
+SkyResetBtn.Position         = UDim2.new(0,10,0,98)
+SkyResetBtn.BackgroundColor3 = Color3.fromRGB(15,15,15)
+SkyResetBtn.Text             = "> Reset Sky"
+SkyResetBtn.TextColor3       = Color3.new(1,1,1)
+SkyResetBtn.Font             = Enum.Font.Code
+SkyResetBtn.TextScaled       = true
+SkyResetBtn.Parent           = VisualsPanel
+
+-- Разделитель
+local VisLine = Instance.new("Frame")
+VisLine.Size             = UDim2.new(1,-20,0,2)
+VisLine.Position         = UDim2.new(0,10,0,145)
+VisLine.BackgroundColor3 = Color3.fromRGB(60,60,60)
+VisLine.BorderSizePixel  = 0
+VisLine.Parent           = VisualsPanel
+
+-- Заголовок Trail
+local TrailLabel = Instance.new("TextLabel")
+TrailLabel.Size = UDim2.new(1,-20,0,30)
+TrailLabel.Position = UDim2.new(0,10,0,155)
+TrailLabel.BackgroundTransparency = 1
+TrailLabel.Text = "— Bluid (Trail) —"
+TrailLabel.TextColor3 = Color3.fromRGB(180,180,180)
+TrailLabel.Font = Enum.Font.Code
+TrailLabel.TextScaled = true
+TrailLabel.Parent = VisualsPanel
+
+-- Кнопка Trail
+local TrailBtn = Instance.new("TextButton")
+TrailBtn.Size             = UDim2.new(1,-20,0,45)
+TrailBtn.Position         = UDim2.new(0,10,0,193)
+TrailBtn.BackgroundColor3 = Color3.fromRGB(15,15,15)
+TrailBtn.Text             = "> Bluid OFF"
+TrailBtn.TextColor3       = Color3.new(1,1,1)
+TrailBtn.Font             = Enum.Font.Code
+TrailBtn.TextScaled       = true
+TrailBtn.Parent           = VisualsPanel
+
+---------------------------------------------------
+-- TELEPORT
+---------------------------------------------------
+
+local Scroll = Instance.new("ScrollingFrame")
+Scroll.Size = UDim2.new(1,-20,1,-20)
+Scroll.Position = UDim2.new(0,10,0,10)
+Scroll.BackgroundTransparency = 1
+Scroll.CanvasSize = UDim2.new(0,0,0,0)
+Scroll.ScrollBarThickness = 5
+Scroll.Parent = MiscPanel
+
+local Layout = Instance.new("UIListLayout")
+Layout.Padding = UDim.new(0,5)
+Layout.Parent = Scroll
+
+local function TeleportToPlayer(plr)
+
+	if not plr.Character then
+		return
+	end
+
+	local target =
+		plr.Character:FindFirstChild("HumanoidRootPart")
+
+	if target then
+		Root.CFrame =
+			target.CFrame + Vector3.new(0,3,0)
+	end
+end
+
+local function RefreshPlayers()
+
+	for _,v in pairs(Scroll:GetChildren()) do
+
+		if v:IsA("TextButton") then
+			v:Destroy()
+		end
+	end
+
+	for _,plr in pairs(Players:GetPlayers()) do
+
+		if plr ~= LP then
+
+			local Btn = Instance.new("TextButton")
+
+			Btn.Size = UDim2.new(1,-5,0,35)
+
+			Btn.BackgroundColor3 =
+				Color3.fromRGB(15,15,15)
+
+			Btn.Text = "> "..plr.Name
+
+			Btn.TextColor3 = Color3.new(1,1,1)
+
+			Btn.Font = Enum.Font.Code
+			Btn.TextScaled = true
+
+			Btn.Parent = Scroll
+
+			Btn.MouseButton1Click:Connect(function()
+
+				TeleportToPlayer(plr)
+
+			end)
+		end
+	end
+
+	task.wait()
+
+	Scroll.CanvasSize =
+		UDim2.new(
+			0,
+			0,
+			0,
+			Layout.AbsoluteContentSize.Y + 10
+		)
+end
+
+RefreshPlayers()
+
+---------------------------------------------------
+-- TAB LOGIC
+---------------------------------------------------
+
+local function SwitchTab(show)
+	GlobalsPanel.Visible  = (show == "globals")
+	SettingsPanel.Visible = (show == "settings")
+	VisualsPanel.Visible  = (show == "visuals")
+	MiscPanel.Visible     = (show == "misc")
+end
+
+GlobalsTab.MouseButton1Click:Connect(function()
+	SwitchTab("globals")
+end)
+
+SettingsTab.MouseButton1Click:Connect(function()
+	SwitchTab("settings")
+end)
+
+VisualsTab.MouseButton1Click:Connect(function()
+	SwitchTab("visuals")
+end)
+
+MiscTab.MouseButton1Click:Connect(function()
+	RefreshPlayers()
+	SwitchTab("misc")
+end)
+
+---------------------------------------------------
+-- COLLAPSE LOGIC
+---------------------------------------------------
+
+local Minimized = false
+
+Collapse.MouseButton1Click:Connect(function()
+
+	Minimized = not Minimized
+
+	if Minimized then
+
+		Main.Size = UDim2.new(0,700,0,60)
+
+		GlobalsTab.Visible = false
+		SettingsTab.Visible = false
+		VisualsTab.Visible = false
+		MiscTab.Visible = false
+
+		GlobalsPanel.Visible = false
+		SettingsPanel.Visible = false
+		VisualsPanel.Visible = false
+		MiscPanel.Visible = false
+
+		Collapse.Text = ">"
+
+	else
+
+		Main.Size = UDim2.new(0,700,0,420)
+
+		GlobalsTab.Visible = true
+		SettingsTab.Visible = true
+		VisualsTab.Visible = true
+		MiscTab.Visible = true
+
+		GlobalsPanel.Visible = true
+
+		Collapse.Text = "<"
+	end
+end)
+
+---------------------------------------------------
+-- BUTTONS
+---------------------------------------------------
+
+FarmBtn.MouseButton1Click:Connect(function()
+
+	Settings.Enabled = not Settings.Enabled
+
+	if Settings.Enabled then
+
+		FarmBtn.Text = "> AutoFarm ON"
+
+		Start()
+
+	else
+
+		FarmBtn.Text = "> AutoFarm OFF"
+
+		StopFarm()
+	end
+end)
+
+NoclipBtn.MouseButton1Click:Connect(function()
+
+	Settings.Noclip = not Settings.Noclip
+
+	if Settings.Noclip then
+
+		NoclipBtn.Text = "> Noclip ON"
+
+	else
+
+		NoclipBtn.Text = "> Noclip OFF"
+
+	end
+end)
+
+FPSBtn.MouseButton1Click:Connect(function()
+	FPSEnabled = not FPSEnabled
+	if FPSEnabled then
+		EnableFPS()
+		FPSBtn.Text = "> FPS Boost ON"
+	else
+		DisableFPS()
+		FPSBtn.Text = "> FPS Boost OFF"
+	end
+end)
+
+-- SkyBox кнопки
+SkyPurpleBtn.MouseButton1Click:Connect(function()
+	SetSky("purple")
+end)
+
+SkyRedBtn.MouseButton1Click:Connect(function()
+	SetSky("red")
+end)
+
+SkyWhiteBtn.MouseButton1Click:Connect(function()
+	SetSky("white")
+end)
+
+SkyResetBtn.MouseButton1Click:Connect(function()
+	SetSky(nil)
+end)
+
+-- Trail
+TrailBtn.MouseButton1Click:Connect(function()
+	TrailEnabled = not TrailEnabled
+	if TrailEnabled then
+		EnableTrail()
+		TrailBtn.Text = "> Bluid ON"
+	else
+		DisableTrail()
+		TrailBtn.Text = "> Bluid OFF"
+	end
+end)
+
+---------------------------------------------------
+-- RESPAWN
+---------------------------------------------------
+
+LP.CharacterAdded:Connect(function()
+
+	task.wait(1)
+
+	UpdateChar()
+
+	if Settings.Enabled then
+		Start()
+	end
+
+	-- Восстанавливаем Trail после респауна
+	if TrailEnabled then
+		task.wait(0.5)
+		DisableTrail()
+		EnableTrail()
+	end
+end)
+
+print("✅ Grape Tool Loaded")
